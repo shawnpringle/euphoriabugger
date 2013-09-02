@@ -22,6 +22,7 @@ include std/filesys.e
 include std/dll.e 
 include std/machine.e 
 include std/sequence.e
+include std/error.e
 
 constant KEYBOARD = 0, SCREEN = 1, ERROR = 2
  
@@ -48,7 +49,18 @@ boolean be_verbose = FALSE, batch = FALSE
 
 cmd = command_line()   -- eui dsearch [string] 
 procedure print_usage()
-        printf(ERROR, "usage : eui dsearch.ex [--help|-h] [--lib librarylist|-llibrarylist] [routine_name]\n")
+        printf(ERROR, "usage : eui dsearch.ex [--help|-h] [--batch|-b] [--verbose|-v] [--lib librarylist|-llibrarylist] [routine_name]\n")
+        puts(ERROR,   
+`
+
+        -h | --help    : this help message
+        -b | --batch   : do not wait for keyboard input.  Just print result and exit.
+        -v | --verbose : be verbose
+        -l | --lib     : specify a list of libraries separated by commas even with spaces
+
+
+
+`)
 end procedure
 
 -- Parse the command line
@@ -97,8 +109,6 @@ while argi <= length(cmd) do
             cmd = cmd[1..argi-1] & {arg[1..2],'-' & arg[3..$]} & cmd[argi+1..$]
         end if
         be_verbose = TRUE
-        print_usage()
-        abort(1)
     elsif equal(arg,"--batch") or (short_letter = 'b') then
         batch = TRUE
         if arg_is_short and length(arg) != 2 then
@@ -115,8 +125,8 @@ while argi <= length(cmd) do
 end while
 
 if not object(orig_string) then 
-    puts(SCREEN, "C function name:") 
-    orig_string = delete_trailing_white(gets(KEYBOARD)) 
+    puts(SCREEN, "C function name:")
+    orig_string = delete_trailing_white(gets(KEYBOARD))
     puts(SCREEN, '\n') 
 end if 
 
@@ -124,7 +134,7 @@ end if
 if atom(library_list) then
     -- scan file list for libraries
     file_list = dir(`c:\windows\system32\*.dll`) & dir(`/usr/lib/*`)  
-	& dir(`/usr/local/lib/*`)  
+	& dir(`/usr/local/lib/*`)
 
     library_list = {}
     for i = 1 to length(file_list) do 
@@ -141,8 +151,7 @@ if atom(library_list) then
                 continue
             end if
         end ifdef
-        puts(ERROR, "filename: " & file_name & 10)
-        library_list = append( library_list, file_name ) 
+        library_list = append( library_list, file_name )
     end for	 
 end if
 
@@ -150,24 +159,41 @@ end if
  
 function scan(sequence file_name) -- as boolean 
 -- process an eligible file 
-    atom lib 
-    lib = open_dll(file_name) 
-    if lib = 0 then 
-	no_open += 1 
-	if be_verbose then
-	    puts(SCREEN, file_name & ": Couldn't open.\n") 
-    end if 
-	return FALSE 
-    end if 
-    scanned += 1 
-    if define_c_var(lib, routine_name) != -1 then 
-        printf(SCREEN, "%s: ", {file_name}) 
-        printf(SCREEN, "\n\n%s was FOUND in %s\n", {routine_name, file_name}) 
-	return TRUE 
-    end if 
-    return FALSE 
-end function 
- 
+    atom lib
+    if be_verbose then
+		puts(SCREEN, file_name & ": opening...")
+	end if
+    lib = open_dll(file_name)
+    
+    if lib = 0 then
+		no_open += 1 
+		if be_verbose then
+			puts(SCREEN, "failed.\n")
+		else
+			puts(SCREEN, file_name & ": Couldn't open.\n") 
+		end if
+		return FALSE
+	elsif be_verbose then
+		puts(SCREEN, "success.")
+    end if
+    scanned += 1
+    if be_verbose then
+    	printf(SCREEN, ".. accessing %s...", {routine_name})
+    end if
+    if define_c_var(lib, routine_name) != -1 then
+    	if be_verbose then
+    		printf(SCREEN, "success!\n", {})
+    	else
+			printf(SCREEN, "%s: ", {file_name})
+			printf(SCREEN, "\n\n%s was FOUND in %s\n", {routine_name, file_name})
+		end if
+		return TRUE
+	elsif be_verbose then
+		puts(SCREEN, "failure.\n")
+    end if
+    return FALSE
+end function
+
 function delete_trailing_white(sequence name) -- as sequence 
 -- get rid of blanks, tabs, newlines at end of string 
     while length(name) > 0 do 
@@ -180,7 +206,6 @@ function delete_trailing_white(sequence name) -- as sequence
     return name 
 end function 
  
- 
 routine_name = orig_string 
  
 procedure locate(sequence name) 
@@ -189,9 +214,11 @@ procedure locate(sequence name)
         puts(SCREEN, "Looking for " & routine_name & "\n ")
     end if
     for i = 1 to length(library_list) do 
-	if scan(library_list[i]) then 
-	    if getc(KEYBOARD) then 
-	    end if 
+	if scan(library_list[i]) then
+	    if not batch then
+	        puts(SCREEN, "Press Enter\n")
+	        getc(KEYBOARD)
+	    end if
 	    abort(1) 
 	end if 
     end for 
@@ -211,8 +238,9 @@ ifdef WINDOWS then
 	locate(orig_string & "ExA") 
 end ifdef 
  
-puts(SCREEN, "\nCouldn't find " & orig_string & '\n') 
-puts(SCREEN, "Press Enter\n") 
- 
-if getc(KEYBOARD) then 
+puts(SCREEN, "\nCouldn't find " & orig_string & '\n')
+if not batch then
+    puts(SCREEN, "Press Enter\n") 
+    if getc(KEYBOARD) then 
+    end if
 end if
