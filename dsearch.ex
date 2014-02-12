@@ -23,6 +23,7 @@ include std/dll.e
 include std/machine.e 
 include std/sequence.e
 include std/error.e
+include std/io.e
 
 constant KEYBOARD = 0, SCREEN = 1, ERROR = 2
  
@@ -163,6 +164,7 @@ function scan(sequence file_name) -- as boolean
     if be_verbose then
 		puts(SCREEN, file_name & ": opening...")
 	end if
+	io:flush(SCREEN)
     lib = open_dll(file_name)
     
     if lib = 0 then
@@ -176,10 +178,12 @@ function scan(sequence file_name) -- as boolean
 	elsif be_verbose then
 		puts(SCREEN, "success.")
     end if
+	io:flush(SCREEN)
     scanned += 1
     if be_verbose then
     	printf(SCREEN, ".. accessing %s...", {routine_name})
     end if
+	io:flush(SCREEN)
     if define_c_var(lib, routine_name) != -1 then
     	if be_verbose then
     		printf(SCREEN, "success!\n", {})
@@ -187,9 +191,11 @@ function scan(sequence file_name) -- as boolean
 			printf(SCREEN, "%s: ", {file_name})
 			printf(SCREEN, "\n\n%s was FOUND in %s\n", {routine_name, file_name})
 		end if
+        io:flush(SCREEN)
 		return TRUE
 	elsif be_verbose then
 		puts(SCREEN, "failure.\n")
+        io:flush(SCREEN)
     end if
     return FALSE
 end function
