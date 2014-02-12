@@ -58,7 +58,7 @@ procedure print_usage()
         -b | --batch   : do not wait for keyboard input.  Just print result and exit.
         -v | --verbose : be verbose
         -l | --lib     : specify a list of libraries separated by commas even with spaces
-
+        -x | --no-lib  : specify a list of libraries separated by commas that should not be tried
 
 
 `)
@@ -115,6 +115,34 @@ while argi <= length(cmd) do
         if arg_is_short and length(arg) != 2 then
             cmd = cmd[1..argi-1] & {"-b",'-' & arg[3..$]} & cmd[argi+1..$]
         end if
+    elsif equal(arg,"--no-lib") or (short_letter = 'x') then
+        if atom(library_list) then
+            library_list = scan_default_libraries()
+        end if
+        if arg_is_short and length(arg) != 2 then
+            cmd = cmd[1..argi-1] & {arg[1..2]} & {arg[3..$]} & cmd[argi+1..$]
+        end if
+        loop do
+            sequence to_remove = {}
+            argi += 1
+            if argi > length(cmd) then
+                exit
+            end if
+            arg = cmd[argi]
+            
+            if arg[$] = ',' then
+                to_remove &= split(arg[1..$-1], ",")
+                continue
+            end if
+            to_remove &= split(arg, ",")
+            for li = 1 to length(to_remove) do
+                integer j = find(to_remove[li], library_list)
+                if j then
+                    library_list = remove(library_list, j)
+                end if
+            end for
+        until TRUE
+        end loop      
     elsif object(orig_string) then
         printf(ERROR, "Error: routine specified twice: \n", {})
         print_usage()
@@ -133,11 +161,16 @@ end if
 
 
 if atom(library_list) then
+    library_list = scan_default_libraries()
+end if
+
+
+function scan_default_libraries()
     -- scan file list for libraries
     file_list = dir(`c:\windows\system32\*.dll`) & dir(`/usr/lib/*`)  
 	& dir(`/usr/local/lib/*`)
 
-    library_list = {}
+    sequence list = {}
     for i = 1 to length(file_list) do 
         if atom(file_list[i]) then 
             continue
@@ -152,9 +185,10 @@ if atom(library_list) then
                 continue
             end if
         end ifdef
-        library_list = append( library_list, file_name )
-    end for	 
-end if
+        list = append( list, file_name )
+    end for
+    return list
+end function
 
  
  
@@ -174,16 +208,17 @@ function scan(sequence file_name) -- as boolean
 		else
 			puts(SCREEN, file_name & ": Couldn't open.\n") 
 		end if
+		io:flush(SCREEN)
 		return FALSE
 	elsif be_verbose then
 		puts(SCREEN, "success.")
+		io:flush(SCREEN)
     end if
-	io:flush(SCREEN)
     scanned += 1
     if be_verbose then
     	printf(SCREEN, ".. accessing %s...", {routine_name})
+		io:flush(SCREEN)
     end if
-	io:flush(SCREEN)
     if define_c_var(lib, routine_name) != -1 then
     	if be_verbose then
     		printf(SCREEN, "success!\n", {})
