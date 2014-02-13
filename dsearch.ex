@@ -25,8 +25,10 @@ include std/sequence.e
 include std/error.e
 include std/io.e
 
+with trace
+
 constant KEYBOARD = 0, SCREEN = 1, ERROR = 2
- 
+
 type enum boolean 
 	TRUE = 1, FALSE = 0 
 end type 
@@ -159,35 +161,128 @@ if not object(orig_string) then
     puts(SCREEN, '\n') 
 end if 
 
-
 if atom(library_list) then
     library_list = scan_default_libraries()
 end if
 
+ifdef LINUX then
+    constant DLL_EXT = "so"
+
+trace(1)
+    
+    -- good for 32 and 64 bit
+    -- these could be wrong on 64 bit Linux. I don't know.
+    -- from /usr/include/bits/dlfcn.h
+    constant RTLD_LAZY  = 1
+    constant RTLD_LOCAL = 0
+    constant RTLD_NOLOAD = 8,
+             RTLD_GLOBAL = #100
+    constant DYNAMIC_LINK_LIBRARY = "libdl.so.2"
+
+    constant libdl = open_dll(DYNAMIC_LINK_LIBRARY)  
+    constant dlopen_sym = define_c_func(libdl, "dlopen", {C_POINTER, C_INT}, C_POINTER)
+    constant dlsym_sym  = define_c_func(libdl, "dlsym", {C_POINTER, C_POINTER}, C_POINTER)
+    constant dlerror_sym = define_c_func(libdl, "dlerror", {}, C_POINTER)
+    constant dlclose_sym = define_c_func(libdl, "dlclose", {C_POINTER}, C_INT)
+    
+    if libdl = 0 or find(-1, dlopen_sym & dlsym_sym & dlerror_sym & dlclose_sym) != 0 then
+       puts(ERROR, "Cannot get dynamic link functions from "&DYNAMIC_LINK_LIBRARY&"\n")
+       abort(1)
+    end if 
+    
+    -- close an opened library
+    procedure dl_close_library(atom lib)
+        c_func(dlclose_sym, {lib})
+    end procedure        
+    
+    -- return 0 on error; positive value on success
+    function dl_open_library(sequence name)
+        atom lib = c_func(dlopen_sym, {allocate_string(name, TRUE), or_bits(RTLD_LAZY, RTLD_LOCAL)})
+        if lib != 0 then
+            return delete_routine( lib, routine_id("dl_close_library") )
+        end if
+        return lib
+    end function
+    
+    -- return -1 on error; non-negative on success
+    function dl_get_symbol(atom handle, sequence name)
+        atom e = c_func(dlerror_sym, {})
+        atom ret = c_func(dlsym_sym, {handle, allocate_string(name, TRUE)})
+        e = c_func(dlerror_sym,{})
+        if e != 0 then
+            return -1
+        end if
+        return ret
+    end function
+    
+    if dl_open_library(DYNAMIC_LINK_LIBRARY) = 0 then
+        puts(ERROR, "dl_open_library can't open what open_dll can.\n")
+        atom error_value = c_func(dlerror_sym,{})
+        if error_value then
+            puts(ERROR, peek_string(error_value) & 10)
+        end if
+        abort(1)
+    end if
+    
+    
+    
+elsifdef WINDOWS then
+    constant DLL_EXT = "dll"
+
+    -- return 0 on error positive value on success
+    function dl_open_library(sequence name)
+        return open_dll(name)
+    end function
+    
+    -- return -1 on error non-negative value on success
+    function dl_get_symbol(atom handle, sequence name)
+        and_bits(define_c_var(handle, name), 
+    end function    
+
+elsedef
+
+    -- return 0 on error positive value on success
+    function dl_open_library(sequence name)
+        return open_dll(name)
+    end function
+    
+    -- return -1 on error non-negative value on success
+    function dl_get_symbol(atom handle, sequence name)
+        return define_c_var(handle, name)
+    end function    
+    
+end ifdef
+
+
+
 
 function scan_default_libraries()
     -- scan file list for libraries
-    file_list = dir(`c:\windows\system32\*.dll`) & dir(`/usr/lib/*`)  
-	& dir(`/usr/local/lib/*`)
-
-    sequence list = {}
-    for i = 1 to length(file_list) do 
-        if atom(file_list[i]) then 
+    sequence filepath_list = {}
+    object filemeta_list = {}
+    sequence path_list = split(`c:\windows\system,/usr/lib,/usr/local/lib`, ',')
+    
+    for h = 1 to length(path_list) do
+        filemeta_list = dir(path_list[h])
+        if atom(filemeta_list) then
             continue
         end if
-        sequence file = file_list[i]
-        if find('d', file[D_ATTRIBUTES]) then
-            continue
-        end if
-        sequence file_name = file[D_NAME]
-        ifdef LINUX then
-            if compare( tail(file_name, 3), ".so") then
+        for i = 1 to length(filemeta_list) do 
+            if atom(filemeta_list[i]) then 
                 continue
             end if
-        end ifdef
-        list = append( list, file_name )
+            sequence file = filemeta_list[i]
+            if find('d', file[D_ATTRIBUTES]) then
+                continue
+            end if
+            sequence file_name = file[D_NAME]
+            if compare( filesys:fileext(file_name), DLL_EXT) then
+                continue
+            end if
+            filepath_list = append( filepath_list, path_list[h] & filesys:SLASH & file_name )
+        end for
     end for
-    return list
+    return filepath_list
 end function
 
  
@@ -199,7 +294,7 @@ function scan(sequence file_name) -- as boolean
 		puts(SCREEN, file_name & ": opening...")
 	end if
 	io:flush(SCREEN)
-    lib = open_dll(file_name)
+    lib = dl_open_library(file_name)
     
     if lib = 0 then
 		no_open += 1 
@@ -219,7 +314,7 @@ function scan(sequence file_name) -- as boolean
     	printf(SCREEN, ".. accessing %s...", {routine_name})
 		io:flush(SCREEN)
     end if
-    if define_c_var(lib, routine_name) != -1 then
+    if dl_get_symbol(lib, routine_name) != -1 then
     	if be_verbose then
     		printf(SCREEN, "success!\n", {})
     	else
